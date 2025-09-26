@@ -55,24 +55,23 @@ buildscript {
             credentials {
                 username = takrepoUser
                 password = takrepoPassword
-    }
+            }
         }
     }
     dependencies {
         classpath 'com.android.tools.build:gradle:4.2.2'
-        if(isDevKitEnabled()) {
+        if (isDevKitEnabled()) {
             classpath "com.atakmap.gradle:atak-gradle-takdev:${takdevVersion}"
         } else {
             classpath files(takdevPlugin)
+        }
     }
- }
 }
 
 allprojects {
     repositories {
         mavenCentral()
         google()
-        mavenCentral()
         mavenLocal()
         maven {
             url "https://jitpack.io"
