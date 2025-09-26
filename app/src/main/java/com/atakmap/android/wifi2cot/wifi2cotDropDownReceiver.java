@@ -46,7 +46,7 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
 
     private final wifi2cotMapComponent mc;
 
-    private final Button start, stop, guess;
+    private final Button start, stop, guess, startBle, stopBle, guessBle;
     private final ListView scanList;
     private final TextView trackingStatus;
     private final TextView scanEmptyView;
@@ -59,6 +59,7 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
     private static final int MAX_TRACKING_MISSES = 3;
 
     private boolean scanning = false;
+    private boolean bleScanning = false;
     private final ArrayAdapter<String> scanListAdapter;
     private final List<SignalSourceSummary> currentSummaries = new ArrayList<>();
     private String trackedId;
@@ -83,6 +84,10 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         start = templateView.findViewById(R.id.start);
         stop = templateView.findViewById(R.id.stop);
         guess = templateView.findViewById(R.id.guess);
+        startBle = templateView.findViewById(R.id.start_ble);
+        stopBle = templateView.findViewById(R.id.stop_ble);
+        guessBle = templateView.findViewById(R.id.guess_ble);
+
         scanList = templateView.findViewById(R.id.scan_list);
         trackingStatus = templateView.findViewById(R.id.tracking_status);
         scanEmptyView = templateView.findViewById(R.id.scan_empty);
@@ -130,6 +135,7 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         mc.stopBleScan();
         stopTracking();
         scanning = false;
+        bleScanning = false;
     }
 
     /**************************** INHERITED METHODS *****************************/
@@ -163,7 +169,7 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
                 resetScanList();
                 cancelScanTimer();
                 cancelUiTimer();
-                mc.startBleScan();
+                bleScanning = mc.startBleScan();
                 scanTimer = new Timer();
                 scanTimer.schedule(new TimerTask() {
                     @Override
@@ -187,6 +193,7 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
                 cancelScanTimer();
                 cancelUiTimer();
                 mc.stopBleScan();
+                bleScanning = false;
                 stopTracking();
                 Log.d(TAG, "Stopping scan");
                 Toast.makeText(MapView._mapView.getContext(), "Stopping scan",
@@ -197,6 +204,34 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
                 Toast.makeText(MapView._mapView.getContext(), "Computing results",
                         Toast.LENGTH_LONG).show();
                 compute();
+            });
+
+            startBle.setOnClickListener(view -> {
+                Log.d(TAG, "Starting BLE scan");
+                wifi2cotMapComponent.getBleNodes().clear();
+                if (mc.startBleScan()) {
+                    bleScanning = true;
+                    Toast.makeText(MapView._mapView.getContext(), "Starting BLE scan",
+                            Toast.LENGTH_LONG).show();
+                } else {
+                    bleScanning = false;
+                    Toast.makeText(MapView._mapView.getContext(),
+                            "Unable to start BLE scan", Toast.LENGTH_LONG).show();
+                }
+            });
+
+            stopBle.setOnClickListener(view -> {
+                Log.d(TAG, "Stopping BLE scan");
+                mc.stopBleScan();
+                bleScanning = false;
+                Toast.makeText(MapView._mapView.getContext(), "Stopping BLE scan",
+                        Toast.LENGTH_LONG).show();
+            });
+
+            guessBle.setOnClickListener(view -> {
+                Toast.makeText(MapView._mapView.getContext(),
+                        "Dispatching BLE results", Toast.LENGTH_LONG).show();
+                computeBle();
             });
         }
     }
@@ -220,6 +255,7 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         mc.stopBleScan();
         stopTracking();
         scanning = false;
+        bleScanning = false;
     }
 
     private void cancelScanTimer() {
@@ -227,6 +263,8 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
             scanTimer.cancel();
             scanTimer = null;
         }
+        mc.stopBleScan();
+        bleScanning = false;
     }
 
     private void cancelUiTimer() {
@@ -500,6 +538,37 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         }
     }
 
+    public boolean isScanning() {
+        return scanning;
+    }
+
+    public boolean isBleScanning() {
+        return bleScanning;
+    }
+
+    private void computeBle() {
+        Log.d(TAG, "In computeBle");
+
+        HashMap<String, List<String[]>> bleSnapshot = wifi2cotMapComponent
+                .getBleNodes();
+        List<SignalSourceSummary> summaries;
+        synchronized (bleSnapshot) {
+            summaries = buildSignalSourceSummaries(bleSnapshot,
+                    SignalSourceType.BLE);
+        }
+
+        for (SignalSourceSummary summary : summaries) {
+            if (summary.sampleSize < MIN_SAMPLE_SIZE_FOR_DISPATCH) {
+                Log.d(TAG, String.format(Locale.US,
+                        "Skipping %s because it only has %d samples",
+                        summary.id, summary.sampleSize));
+                continue;
+            }
+
+            dispatchSignalSourceSummary(summary);
+        }
+    }
+
     private void dispatchSignalSourceSummary(SignalSourceSummary summary) {
         Log.d(TAG, String.format(Locale.US,
                 "Dispatching %s at %.14f, %.14f (avg strength %.2f)",
@@ -515,8 +584,21 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
 
         cotEvent.setUID(summary.getUid());
 
-        cotEvent.setType("a-f-G-I-E");
+        String cotType;
+        String sourceLabel;
+        switch (summary.type) {
+            case BLE:
+                cotType = "b-l-l";
+                sourceLabel = "MetaRadar";
+                break;
+            case WIFI:
+            default:
+                cotType = "a-f-G-I-E";
+                sourceLabel = "wifi2cot";
+                break;
+        }
 
+        cotEvent.setType(cotType);
         cotEvent.setHow("m-g");
 
         CotPoint cotPoint = new CotPoint(summary.latitude, summary.longitude,
@@ -531,7 +613,7 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         contactDetail.setAttribute("endpoint", "0.0.0.0:4242:tcp");
 
         CotDetail cotRemark = new CotDetail("remarks");
-        cotRemark.setAttribute("source", "wifi2cot");
+        cotRemark.setAttribute("source", sourceLabel);
         cotRemark.setInnerText(String.format(Locale.US,
                 "Type: %s\nName: %s\nSample size: %d\nAverage signal quality: %.2f\nBest sample: %d\nWorst sample: %d",
                 getTypeLabel(summary.type), getDisplayName(summary),
@@ -546,11 +628,6 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         else
             Log.e(TAG, "cotEvent was not valid");
     }
-
-    public boolean isScanning() {
-        return scanning;
-    }
-
     private List<SignalSourceSummary> buildSignalSourceSummaries(
             Map<String, List<String[]>> nodes, SignalSourceType type) {
         List<SignalSourceSummary> summaries = new ArrayList<>();

@@ -1,8 +1,7 @@
-
 package com.atakmap.android.wifi2cot;
 
+import android.annotation.SuppressLint;
 import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
@@ -12,51 +11,43 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.net.wifi.WifiManager;
+import android.os.Build;
 
-import com.atakmap.android.ipc.AtakBroadcast.DocumentedIntentFilter;
-
-import com.atakmap.android.maps.MapView;
 import com.atakmap.android.dropdown.DropDownMapComponent;
-
-import com.atakmap.coremap.log.Log;
+import com.atakmap.android.ipc.AtakBroadcast.DocumentedIntentFilter;
+import com.atakmap.android.maps.MapView;
 import com.atakmap.android.wifi2cot.plugin.R;
+import com.atakmap.coremap.log.Log;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 
 public class wifi2cotMapComponent extends DropDownMapComponent {
 
     private static final String TAG = "wifi2cotMapComponent";
 
-    private Context pluginContext;
-
     private MapView mapView;
-
     private wifi2cotDropDownReceiver ddr;
 
     private WifiManager wifiManager;
-    private BluetoothLeScanner bluetoothLeScanner;
-
     private BroadcastReceiver wifiScanReceiver;
+
+    private BluetoothAdapter bluetoothAdapter;
+    private BluetoothLeScanner bluetoothLeScanner;
     private ScanCallback bleScanCallback;
     private boolean bleScanActive = false;
 
-    // nodes will hold k,v for the BSSID and the rssi,lat,lng,bssid,ssid values
-    private final static HashMap<String, List<String[]>> wifiNodes = new HashMap<>();
-    private final static HashMap<String, List<String[]>> bleNodes = new HashMap<>();
+    private static final HashMap<String, List<String[]>> wifiNodes = new HashMap<>();
+    private static final HashMap<String, List<String[]>> bleNodes = new HashMap<>();
 
-    public void onCreate(final Context context, Intent intent,
-            final MapView view) {
+    public void onCreate(final Context context, Intent intent, final MapView view) {
 
         context.setTheme(R.style.ATAKPluginTheme);
         super.onCreate(context, intent, view);
-        pluginContext = context;
         mapView = view;
 
-        ddr = new wifi2cotDropDownReceiver(
-                view, context, this);
+        ddr = new wifi2cotDropDownReceiver(view, context, this);
 
         Log.d(TAG, "registering the plugin filter");
         DocumentedIntentFilter ddFilter = new DocumentedIntentFilter();
@@ -64,6 +55,19 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
         registerDropDownReceiver(ddr, ddFilter);
 
         wifiManager = (WifiManager) context.getSystemService(Context.WIFI_SERVICE);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
+            BluetoothManager bluetoothManager =
+                    (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
+            if (bluetoothManager != null) {
+                bluetoothAdapter = bluetoothManager.getAdapter();
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP
+                        && bluetoothAdapter != null) {
+                    bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
+                    bleScanCallback = createBleScanCallback();
+                }
+            }
+        }
 
         wifiScanReceiver = new BroadcastReceiver() {
             @Override
@@ -74,7 +78,6 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
                 if (success) {
                     scanSuccess();
                 } else {
-                    // scan failure handling
                     scanFailure();
                 }
             }
@@ -84,30 +87,13 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
         intentFilter.addAction(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION);
         context.registerReceiver(wifiScanReceiver, intentFilter);
 
-        boolean success = wifiManager.startScan();
+        boolean success = wifiManager != null && wifiManager.startScan();
         if (!success) {
-            // scan failure handling
             scanFailure();
         }
-
-        BluetoothManager bluetoothManager = (BluetoothManager) context
-                .getSystemService(Context.BLUETOOTH_SERVICE);
-        if (bluetoothManager != null) {
-            BluetoothAdapter adapter = bluetoothManager.getAdapter();
-            if (adapter != null) {
-                bluetoothLeScanner = adapter.getBluetoothLeScanner();
-            }
-        }
-        bleScanCallback = buildBleScanCallback();
     }
 
     double getDistance(int rssi, int txPower, int freq) {
-        /*
-         * RSSI = TxPower - 10 * n * lg(d)
-         * n = 2 (in free space)
-         *
-         * d = 10 ^ ((TxPower - RSSI) / (10 * n))
-         */
         int n = 2;
         if (freq > 5000) {
             n++;
@@ -119,7 +105,7 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
 
         Log.d(TAG, "Inside scanSuccess");
 
-        if (!ddr.isScanning()) {
+        if (ddr == null || !ddr.isScanning()) {
             Log.d(TAG, "Not in scanning mode");
             return;
         }
@@ -128,18 +114,24 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
             @Override
             public void run() {
 
-                List<android.net.wifi.ScanResult> results = wifiManager
-                        .getScanResults();
+                if (wifiManager == null) {
+                    return;
+                }
+
+                List<android.net.wifi.ScanResult> results = wifiManager.getScanResults();
                 for (android.net.wifi.ScanResult s : results) {
 
-                    Log.d(TAG, "Scan result: BSSID: " + s.BSSID + " SSID: "
-                            + s.SSID + " RSSI: " + s.level + " Freq: "
-                            + s.frequency);
+                    Log.d(TAG, "Scan result: BSSID: " + s.BSSID + " SSID: " + s.SSID
+                            + " RSSI: " + s.level + " Freq: " + s.frequency);
 
-                    double lat = mapView.getSelfMarker().getPoint()
-                            .getLatitude();
-                    double lng = mapView.getSelfMarker().getPoint()
-                            .getLongitude();
+                    if (mapView == null || mapView.getSelfMarker() == null
+                            || mapView.getSelfMarker().getPoint() == null) {
+                        Log.d(TAG, "MapView not ready for Wi-Fi sample");
+                        return;
+                    }
+
+                    double lat = mapView.getSelfMarker().getPoint().getLatitude();
+                    double lng = mapView.getSelfMarker().getPoint().getLongitude();
 
                     if (lat == 0 && lng == 0) {
                         Log.d(TAG, "No GPS fix");
@@ -154,11 +146,155 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
     }
 
     private void scanFailure() {
-        // handle failure: new scan did NOT succeed
-        // consider using old scan results: these are the OLD results!
+        if (wifiManager == null) {
+            return;
+        }
         List<android.net.wifi.ScanResult> results = wifiManager.getScanResults();
         Log.d(TAG, "Scan failed");
-//  ... potentially use older scan results ...
+        for (android.net.wifi.ScanResult s : results) {
+            Log.d(TAG, String.format("Previous result: %s (%s)", s.SSID, s.BSSID));
+        }
+    }
+
+    private ScanCallback createBleScanCallback() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            return null;
+        }
+
+        return new ScanCallback() {
+            @Override
+            public void onScanResult(int callbackType, ScanResult result) {
+                handleBleScanResult(result);
+            }
+
+            @Override
+            public void onBatchScanResults(List<ScanResult> results) {
+                if (results == null) {
+                    return;
+                }
+                for (ScanResult result : results) {
+                    handleBleScanResult(result);
+                }
+            }
+
+            @Override
+            public void onScanFailed(int errorCode) {
+                Log.e(TAG, "BLE scan failed: " + errorCode);
+            }
+        };
+    }
+
+    private void handleBleScanResult(ScanResult result) {
+        if (result == null || ddr == null || !ddr.isBleScanning()) {
+            return;
+        }
+
+        if (mapView == null || mapView.getSelfMarker() == null
+                || mapView.getSelfMarker().getPoint() == null) {
+            Log.d(TAG, "MapView not ready for BLE sample");
+            return;
+        }
+
+        double lat = mapView.getSelfMarker().getPoint().getLatitude();
+        double lng = mapView.getSelfMarker().getPoint().getLongitude();
+
+        if (lat == 0.0 && lng == 0.0) {
+            Log.d(TAG, "No GPS fix for BLE sample");
+            return;
+        }
+
+        String latString = String.valueOf(lat);
+        String lngString = String.valueOf(lng);
+
+        if (latString.startsWith("0.0") && lngString.startsWith("0.0")) {
+            return;
+        }
+
+        if (result.getDevice() == null || result.getDevice().getAddress() == null
+                || result.getDevice().getAddress().isEmpty()) {
+            return;
+        }
+
+        String address = result.getDevice().getAddress();
+        String name = result.getDevice().getName();
+        if (name == null) {
+            name = "";
+        }
+
+        int quality = 100 - Math.abs(result.getRssi());
+        if (quality < 0) {
+            quality = 0;
+        }
+
+        recordSignalSample(bleNodes, address, name, quality, lat, lng);
+    }
+
+    @SuppressLint("MissingPermission")
+    public boolean startBleScan() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            Log.w(TAG, "BLE scanning not supported on this device");
+            return false;
+        }
+
+        if (bluetoothAdapter == null) {
+            Log.w(TAG, "Bluetooth adapter not available");
+            return false;
+        }
+
+        if (!bluetoothAdapter.isEnabled()) {
+            Log.w(TAG, "Bluetooth adapter is disabled");
+            return false;
+        }
+
+        if (bluetoothLeScanner == null) {
+            bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
+        }
+
+        if (bluetoothLeScanner == null) {
+            Log.w(TAG, "Bluetooth LE scanner not available");
+            return false;
+        }
+
+        if (bleScanCallback == null) {
+            bleScanCallback = createBleScanCallback();
+        }
+
+        if (bleScanCallback == null) {
+            Log.w(TAG, "BLE scan callback not initialized");
+            return false;
+        }
+
+        if (bleScanActive) {
+            return true;
+        }
+
+        try {
+            bluetoothLeScanner.startScan(bleScanCallback);
+            bleScanActive = true;
+            return true;
+        } catch (SecurityException e) {
+            Log.e(TAG, "Missing permission to start BLE scan", e);
+            return false;
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    public void stopBleScan() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            return;
+        }
+
+        if (bluetoothLeScanner == null || bleScanCallback == null || !bleScanActive) {
+            return;
+        }
+
+        try {
+            bluetoothLeScanner.stopScan(bleScanCallback);
+        } catch (SecurityException e) {
+            Log.e(TAG, "Missing permission to stop BLE scan", e);
+        } finally {
+            bleScanActive = false;
+        }
     }
 
     @Override
@@ -182,101 +318,12 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
         return bleNodes;
     }
 
-    public void startBleScan() {
-        if (bluetoothLeScanner == null || bleScanCallback == null) {
-            Log.w(TAG, "BLE scanner unavailable");
-            return;
-        }
-        if (bleScanActive) {
-            return;
-        }
-        try {
-            bluetoothLeScanner.startScan(bleScanCallback);
-            bleScanActive = true;
-            Log.d(TAG, "BLE scan started");
-        } catch (SecurityException e) {
-            Log.e(TAG, "Missing permission to start BLE scan", e);
-        }
-    }
-
-    public void stopBleScan() {
-        if (bluetoothLeScanner == null || bleScanCallback == null
-                || !bleScanActive) {
-            return;
-        }
-        try {
-            bluetoothLeScanner.stopScan(bleScanCallback);
-            bleScanActive = false;
-            Log.d(TAG, "BLE scan stopped");
-        } catch (SecurityException e) {
-            Log.e(TAG, "Missing permission to stop BLE scan", e);
-        }
-    }
-
-    private ScanCallback buildBleScanCallback() {
-        return new ScanCallback() {
-            @Override
-            public void onScanResult(int callbackType, ScanResult result) {
-                handleBleScanResult(result);
-            }
-
-            @Override
-            public void onBatchScanResults(List<ScanResult> results) {
-                for (ScanResult result : results) {
-                    handleBleScanResult(result);
-                }
-            }
-
-            @Override
-            public void onScanFailed(int errorCode) {
-                Log.e(TAG, "BLE scan failed with error code " + errorCode);
-            }
-        };
-    }
-
-    private void handleBleScanResult(ScanResult result) {
-        if (!ddr.isScanning()) {
-            return;
-        }
-        if (result == null) {
-            return;
-        }
-
-        double lat = mapView.getSelfMarker().getPoint().getLatitude();
-        double lng = mapView.getSelfMarker().getPoint().getLongitude();
-
-        if (lat == 0 && lng == 0) {
-            Log.d(TAG, "Skipping BLE sample - no GPS fix");
-            return;
-        }
-
-        BluetoothDevice device = result.getDevice();
-        if (device == null) {
-            return;
-        }
-
-        String address = device.getAddress();
-        if (address == null || address.isEmpty()) {
-            return;
-        }
-
-        String name = device.getName();
-        if ((name == null || name.isEmpty())
-                && result.getScanRecord() != null) {
-            name = result.getScanRecord().getDeviceName();
-        }
-
-        recordSignalSample(bleNodes, address, name,
-                100 - Math.abs(result.getRssi()), lat, lng);
-    }
-
     private void recordSignalSample(HashMap<String, List<String[]>> target,
             String key, String name, int strength, double lat, double lng) {
         if (key == null || key.isEmpty()) {
             return;
         }
-        if ((lat == 0 && lng == 0) || Double.isNaN(lat)
-                || Double.isNaN(lng)) {
+        if ((lat == 0 && lng == 0) || Double.isNaN(lat) || Double.isNaN(lng)) {
             return;
         }
 
@@ -296,5 +343,5 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
             data.add(sample);
         }
     }
-
 }
+
