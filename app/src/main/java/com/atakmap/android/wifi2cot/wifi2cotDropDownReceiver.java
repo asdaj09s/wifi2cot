@@ -58,8 +58,9 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
 
     private boolean scanning = false;
     private final ArrayAdapter<String> scanListAdapter;
-    private final List<AccessPointSummary> currentSummaries = new ArrayList<>();
-    private String trackedBssid;
+    private final List<SignalSourceSummary> currentSummaries = new ArrayList<>();
+    private String trackedId;
+    private SignalSourceType trackedType;
     private String trackedDisplayName;
 
     /**************************** CONSTRUCTOR *****************************/
@@ -91,7 +92,7 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position,
                     long id) {
-                AccessPointSummary summary;
+                SignalSourceSummary summary;
                 synchronized (currentSummaries) {
                     if (position < 0 || position >= currentSummaries.size()) {
                         return;
@@ -103,7 +104,9 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
                     return;
                 }
 
-                if (summary.bssid.equals(trackedBssid)) {
+                if (trackedId != null && trackedType != null
+                        && summary.id.equals(trackedId)
+                        && summary.type == trackedType) {
                     stopTracking();
                 } else {
                     startTracking(summary, position);
@@ -117,6 +120,7 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
     public void disposeImpl() {
         cancelScanTimer();
         cancelUiTimer();
+        mc.stopBleScan();
         stopTracking();
         scanning = false;
     }
@@ -144,9 +148,13 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
                 synchronized (wifi2cotMapComponent.getNodes()) {
                     wifi2cotMapComponent.getNodes().clear();
                 }
+                synchronized (wifi2cotMapComponent.getBleNodes()) {
+                    wifi2cotMapComponent.getBleNodes().clear();
+                }
                 resetScanList();
                 cancelScanTimer();
                 cancelUiTimer();
+                mc.startBleScan();
                 scanTimer = new Timer();
                 scanTimer.schedule(new TimerTask() {
                     @Override
@@ -169,6 +177,7 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
                 scanning = false;
                 cancelScanTimer();
                 cancelUiTimer();
+                mc.stopBleScan();
                 stopTracking();
                 Log.d(TAG, "Stopping scan");
                 Toast.makeText(MapView._mapView.getContext(), "Stopping scan",
@@ -199,6 +208,7 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
     public void onDropDownClose() {
         cancelScanTimer();
         cancelUiTimer();
+        mc.stopBleScan();
         stopTracking();
         scanning = false;
     }
@@ -218,20 +228,23 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
     }
 
     private void stopTracking() {
-        trackedBssid = null;
+        trackedId = null;
+        trackedType = null;
         trackedDisplayName = null;
         if (trackTimer != null) {
             trackTimer.cancel();
             trackTimer = null;
         }
         templateView.post(() -> {
-            trackingStatus.setText(pluginContext.getString(R.string.tracking_none));
+            trackingStatus
+                    .setText(pluginContext.getString(R.string.tracking_none));
             scanList.clearChoices();
         });
     }
 
-    private void startTracking(AccessPointSummary summary, int position) {
-        trackedBssid = summary.bssid;
+    private void startTracking(SignalSourceSummary summary, int position) {
+        trackedId = summary.id;
+        trackedType = summary.type;
         trackedDisplayName = getDisplayName(summary);
         if (trackTimer != null) {
             trackTimer.cancel();
@@ -240,7 +253,7 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         trackTimer.schedule(new TimerTask() {
             @Override
             public void run() {
-                dispatchTrackedAccessPoint();
+                dispatchTrackedSignalSource();
             }
         }, 0, 5000);
 
@@ -248,22 +261,46 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
             scanList.setItemChecked(position, true);
             updateTrackingStatus(summary,
                     summary.sampleSize < MIN_SAMPLE_SIZE_FOR_DISPATCH);
-            String message = pluginContext.getString(R.string.tracking_template,
-                    getDisplayName(summary), summary.bssid);
+            String message = pluginContext.getString(
+                    R.string.tracking_template_with_type,
+                    getTypeLabel(summary.type), getDisplayName(summary),
+                    summary.id);
             Toast.makeText(MapView._mapView.getContext(), message,
                     Toast.LENGTH_SHORT).show();
         });
     }
 
     private void refreshScanSummaries() {
-        HashMap<String, List<String[]>> nodeSnapshot = wifi2cotMapComponent.getNodes();
-        List<AccessPointSummary> summaries;
-        synchronized (nodeSnapshot) {
-            summaries = buildAccessPointSummaries(nodeSnapshot);
+        List<SignalSourceSummary> summaries = new ArrayList<>();
+        HashMap<String, List<String[]>> wifiSnapshot = wifi2cotMapComponent
+                .getNodes();
+        synchronized (wifiSnapshot) {
+            summaries.addAll(buildSignalSourceSummaries(wifiSnapshot,
+                    SignalSourceType.WIFI));
+        }
+        HashMap<String, List<String[]>> bleSnapshot = wifi2cotMapComponent
+                .getBleNodes();
+        synchronized (bleSnapshot) {
+            summaries.addAll(buildSignalSourceSummaries(bleSnapshot,
+                    SignalSourceType.BLE));
         }
 
+        summaries.sort((left, right) -> {
+            int typeCompare = left.type.compareTo(right.type);
+            if (typeCompare != 0) {
+                return typeCompare;
+            }
+            String leftName = getDisplayName(left);
+            String rightName = getDisplayName(right);
+            int nameCompare = leftName.compareToIgnoreCase(rightName);
+            if (nameCompare != 0) {
+                return nameCompare;
+            }
+            return left.id.compareToIgnoreCase(right.id);
+        });
+
         final List<String> formatted = new ArrayList<>();
-        for (AccessPointSummary summary : summaries) {
+        for (SignalSourceSummary summary : summaries) {
             formatted.add(formatSummary(summary));
         }
 
@@ -279,8 +316,8 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
             }
             scanListAdapter.notifyDataSetChanged();
 
-            if (trackedBssid != null) {
-                int index = findSummaryIndex(trackedBssid);
+            if (trackedId != null && trackedType != null) {
+                int index = findSummaryIndex(trackedId, trackedType);
                 if (index >= 0) {
                     scanList.setItemChecked(index, true);
                 } else {
@@ -302,10 +339,10 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         });
     }
 
-    private void dispatchTrackedAccessPoint() {
-        AccessPointSummary summary = getSummaryForTrackedBssid();
+    private void dispatchTrackedSignalSource() {
+        SignalSourceSummary summary = getSummaryForTrackedSource();
         if (summary == null) {
-            if (trackedBssid != null) {
+            if (trackedId != null && trackedType != null) {
                 updateTrackingStatus(null, true);
             } else {
                 updateTrackingStatus(null, false);
@@ -320,16 +357,17 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         }
 
         updateTrackingStatus(summary, false);
-        dispatchAccessPointSummary(summary);
+        dispatchSignalSourceSummary(summary);
     }
 
-    private AccessPointSummary getSummaryForTrackedBssid() {
-        if (trackedBssid == null) {
+    private SignalSourceSummary getSummaryForTrackedSource() {
+        if (trackedId == null || trackedType == null) {
             return null;
         }
         synchronized (currentSummaries) {
-            for (AccessPointSummary summary : currentSummaries) {
-                if (summary.bssid.equals(trackedBssid)) {
+            for (SignalSourceSummary summary : currentSummaries) {
+                if (summary.id.equals(trackedId)
+                        && summary.type == trackedType) {
                     return summary;
                 }
             }
@@ -337,10 +375,11 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         return null;
     }
 
-    private int findSummaryIndex(String bssid) {
+    private int findSummaryIndex(String id, SignalSourceType type) {
         synchronized (currentSummaries) {
             for (int i = 0; i < currentSummaries.size(); i++) {
-                if (currentSummaries.get(i).bssid.equals(bssid)) {
+                SignalSourceSummary summary = currentSummaries.get(i);
+                if (summary.type == type && summary.id.equals(id)) {
                     return i;
                 }
             }
@@ -348,77 +387,94 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         return -1;
     }
 
-    private void updateTrackingStatus(AccessPointSummary summary, boolean awaitingMoreSamples) {
+    private void updateTrackingStatus(SignalSourceSummary summary,
+            boolean awaitingMoreSamples) {
         final String text;
         if (summary == null) {
-            if (trackedBssid == null) {
+            if (trackedId == null || trackedType == null) {
                 text = pluginContext.getString(R.string.tracking_none);
             } else {
-                String displayName = trackedDisplayName != null ? trackedDisplayName
-                        : trackedBssid;
+                String displayName = trackedDisplayName != null
+                        && !trackedDisplayName.isEmpty() ? trackedDisplayName
+                                : trackedId;
+                String typeLabel = getTypeLabel(trackedType);
                 if (awaitingMoreSamples) {
-                    text = pluginContext.getString(R.string.tracking_waiting, displayName,
-                            trackedBssid);
+                    text = pluginContext.getString(
+                            R.string.tracking_waiting_with_type, typeLabel,
+                            displayName, trackedId);
                 } else {
-                    text = pluginContext.getString(R.string.tracking_template, displayName,
-                            trackedBssid);
+                    text = pluginContext.getString(
+                            R.string.tracking_template_with_type, typeLabel,
+                            displayName, trackedId);
                 }
             }
         } else {
             String displayName = getDisplayName(summary);
+            String typeLabel = getTypeLabel(summary.type);
             if (awaitingMoreSamples) {
-                text = pluginContext.getString(R.string.tracking_waiting, displayName,
-                        summary.bssid);
+                text = pluginContext.getString(
+                        R.string.tracking_waiting_with_type, typeLabel,
+                        displayName, summary.id);
             } else {
-                text = pluginContext.getString(R.string.tracking_template, displayName,
-                        summary.bssid);
+                text = pluginContext.getString(
+                        R.string.tracking_template_with_type, typeLabel,
+                        displayName, summary.id);
             }
         }
 
         templateView.post(() -> trackingStatus.setText(text));
     }
 
-    private String getDisplayName(AccessPointSummary summary) {
-        if (summary.ssid == null || summary.ssid.trim().isEmpty()) {
-            return summary.bssid;
+    private String getDisplayName(SignalSourceSummary summary) {
+        if (summary.displayName == null
+                || summary.displayName.trim().isEmpty()) {
+            return summary.id;
         }
-        return summary.ssid;
+        return summary.displayName;
     }
 
-    private String formatSummary(AccessPointSummary summary) {
+    private String formatSummary(SignalSourceSummary summary) {
         return String.format(Locale.US,
-                "%s (%s)\nSamples: %d  Avg: %.1f  Best: %d  Worst: %d",
-                getDisplayName(summary), summary.bssid, summary.sampleSize,
-                summary.averageSignal, summary.strongestSample,
-                summary.weakestSample);
+                "[%s] %s (%s)\nSamples: %d  Avg: %.1f  Best: %d  Worst: %d",
+                getTypeLabel(summary.type), getDisplayName(summary),
+                summary.id, summary.sampleSize, summary.averageSignal,
+                summary.strongestSample, summary.weakestSample);
     }
 
     public void compute() {
 
         Log.d(TAG, "In compute");
 
-        HashMap<String, List<String[]>> nodes = wifi2cotMapComponent.getNodes();
-
-        List<AccessPointSummary> summaries;
-        synchronized (nodes) {
-            summaries = buildAccessPointSummaries(nodes);
+        List<SignalSourceSummary> combined = new ArrayList<>();
+        HashMap<String, List<String[]>> wifiSnapshot = wifi2cotMapComponent
+                .getNodes();
+        synchronized (wifiSnapshot) {
+            combined.addAll(buildSignalSourceSummaries(wifiSnapshot,
+                    SignalSourceType.WIFI));
         }
-        for (AccessPointSummary summary : summaries) {
+        HashMap<String, List<String[]>> bleSnapshot = wifi2cotMapComponent
+                .getBleNodes();
+        synchronized (bleSnapshot) {
+            combined.addAll(buildSignalSourceSummaries(bleSnapshot,
+                    SignalSourceType.BLE));
+        }
+
+        for (SignalSourceSummary summary : combined) {
             if (summary.sampleSize < MIN_SAMPLE_SIZE_FOR_DISPATCH) {
                 Log.d(TAG, String.format(Locale.US,
-                        "Skipping %s because it only has %d samples", summary.bssid,
-                        summary.sampleSize));
+                        "Skipping %s because it only has %d samples",
+                        summary.id, summary.sampleSize));
                 continue;
             }
 
-            dispatchAccessPointSummary(summary);
+            dispatchSignalSourceSummary(summary);
         }
     }
 
-    private void dispatchAccessPointSummary(AccessPointSummary summary) {
+    private void dispatchSignalSourceSummary(SignalSourceSummary summary) {
         Log.d(TAG, String.format(Locale.US,
                 "Dispatching %s at %.14f, %.14f (avg strength %.2f)",
-                summary.bssid, summary.latitude, summary.longitude,
+                summary.id, summary.latitude, summary.longitude,
                 summary.averageSignal));
 
         CotEvent cotEvent = new CotEvent();
@@ -428,7 +484,7 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         cotEvent.setStart(time);
         cotEvent.setStale(time.addMinutes(90));
 
-        cotEvent.setUID(summary.bssid);
+        cotEvent.setUID(summary.getUid());
 
         cotEvent.setType("a-f-G-I-E");
 
@@ -442,14 +498,15 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         cotEvent.setDetail(cotDetail);
 
         CotDetail contactDetail = new CotDetail("contact");
-        contactDetail.setAttribute("callsign", summary.ssid);
+        contactDetail.setAttribute("callsign", getDisplayName(summary));
         contactDetail.setAttribute("endpoint", "0.0.0.0:4242:tcp");
 
         CotDetail cotRemark = new CotDetail("remarks");
         cotRemark.setAttribute("source", "wifi2cot");
         cotRemark.setInnerText(String.format(Locale.US,
-                "SSID: %s\nSample size: %d\nAverage signal quality: %.2f\nBest sample: %d\nWorst sample: %d",
-                summary.ssid, summary.sampleSize, summary.averageSignal,
+                "Type: %s\nName: %s\nSample size: %d\nAverage signal quality: %.2f\nBest sample: %d\nWorst sample: %d",
+                getTypeLabel(summary.type), getDisplayName(summary),
+                summary.sampleSize, summary.averageSignal,
                 summary.strongestSample, summary.weakestSample));
 
         cotDetail.addChild(contactDetail);
@@ -465,9 +522,9 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         return scanning;
     }
 
-    private List<AccessPointSummary> buildAccessPointSummaries(
-            Map<String, List<String[]>> nodes) {
-        List<AccessPointSummary> summaries = new ArrayList<>();
+    private List<SignalSourceSummary> buildSignalSourceSummaries(
+            Map<String, List<String[]>> nodes, SignalSourceType type) {
+        List<SignalSourceSummary> summaries = new ArrayList<>();
         for (Map.Entry<String, List<String[]>> entry : nodes.entrySet()) {
             List<String[]> samples = entry.getValue();
             if (samples == null || samples.isEmpty()) {
@@ -479,13 +536,13 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
             double weightTotal = 0.0;
             int strongestSample = Integer.MIN_VALUE;
             int weakestSample = Integer.MAX_VALUE;
-            String ssid = "";
+            String displayName = "";
 
             for (String[] sample : samples) {
                 int weight = Integer.parseInt(sample[0]);
                 double lat = Double.parseDouble(sample[1]);
                 double lng = Double.parseDouble(sample[2]);
-                ssid = sample[4];
+                displayName = sample[4];
 
                 weightTotal += weight;
                 weightedLatSum += lat * weight;
@@ -509,34 +566,57 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
             double lat = weightedLatSum / weightTotal;
             double lng = weightedLngSum / weightTotal;
 
-            summaries.add(new AccessPointSummary(entry.getKey(), ssid, lat, lng,
-                    samples.size(), avgSignal, strongestSample, weakestSample));
+            summaries.add(new SignalSourceSummary(entry.getKey(), displayName,
+                    lat, lng, samples.size(), avgSignal, strongestSample,
+                    weakestSample, type));
         }
 
         return summaries;
     }
 
-    private static class AccessPointSummary {
-        final String bssid;
-        final String ssid;
+    private String getTypeLabel(SignalSourceType type) {
+        switch (type) {
+            case BLE:
+                return pluginContext.getString(R.string.type_ble);
+            case WIFI:
+            default:
+                return pluginContext.getString(R.string.type_wifi);
+        }
+    }
+
+    private static class SignalSourceSummary {
+        final String id;
+        final String displayName;
         final double latitude;
         final double longitude;
         final int sampleSize;
         final double averageSignal;
         final int strongestSample;
         final int weakestSample;
+        final SignalSourceType type;
 
-        AccessPointSummary(String bssid, String ssid, double latitude,
+        SignalSourceSummary(String id, String displayName, double latitude,
                 double longitude, int sampleSize, double averageSignal,
-                int strongestSample, int weakestSample) {
-            this.bssid = bssid;
-            this.ssid = ssid;
+                int strongestSample, int weakestSample,
+                SignalSourceType type) {
+            this.id = id;
+            this.displayName = displayName;
             this.latitude = latitude;
             this.longitude = longitude;
             this.sampleSize = sampleSize;
             this.averageSignal = averageSignal;
             this.strongestSample = strongestSample;
             this.weakestSample = weakestSample;
+            this.type = type;
         }
+
+        String getUid() {
+            return type.name().toLowerCase(Locale.US) + "-" + id;
+        }
+    }
+
+    private enum SignalSourceType {
+        WIFI,
+        BLE
     }
 }
