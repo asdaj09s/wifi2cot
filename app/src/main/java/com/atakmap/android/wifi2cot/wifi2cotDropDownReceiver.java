@@ -42,13 +42,14 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
 
     private final wifi2cotMapComponent mc;
 
-    private final Button start, stop, guess;
+    private final Button start, stop, guess, startBle, stopBle, guessBle;
 
     private Timer timer;
 
     private static final int MIN_SAMPLE_SIZE_FOR_DISPATCH = 3;
 
     private boolean scanning = false;
+    private boolean bleScanning = false;
 
     /**************************** CONSTRUCTOR *****************************/
 
@@ -67,6 +68,9 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         start = templateView.findViewById(R.id.start);
         stop = templateView.findViewById(R.id.stop);
         guess = templateView.findViewById(R.id.guess);
+        startBle = templateView.findViewById(R.id.start_ble);
+        stopBle = templateView.findViewById(R.id.stop_ble);
+        guessBle = templateView.findViewById(R.id.guess_ble);
     }
 
     /**************************** PUBLIC METHODS *****************************/
@@ -77,6 +81,8 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
             timer = null;
             scanning = false;
         }
+        mc.stopBleScan();
+        bleScanning = false;
     }
 
     /**************************** INHERITED METHODS *****************************/
@@ -127,6 +133,34 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
                         Toast.LENGTH_LONG).show();
                 compute();
             });
+
+            startBle.setOnClickListener(view -> {
+                Log.d(TAG, "Starting BLE scan");
+                wifi2cotMapComponent.getBleNodes().clear();
+                if (mc.startBleScan()) {
+                    bleScanning = true;
+                    Toast.makeText(MapView._mapView.getContext(), "Starting BLE scan",
+                            Toast.LENGTH_LONG).show();
+                } else {
+                    bleScanning = false;
+                    Toast.makeText(MapView._mapView.getContext(),
+                            "Unable to start BLE scan", Toast.LENGTH_LONG).show();
+                }
+            });
+
+            stopBle.setOnClickListener(view -> {
+                Log.d(TAG, "Stopping BLE scan");
+                mc.stopBleScan();
+                bleScanning = false;
+                Toast.makeText(MapView._mapView.getContext(), "Stopping BLE scan",
+                        Toast.LENGTH_LONG).show();
+            });
+
+            guessBle.setOnClickListener(view -> {
+                Toast.makeText(MapView._mapView.getContext(),
+                        "Dispatching BLE results", Toast.LENGTH_LONG).show();
+                computeBle();
+            });
         }
     }
 
@@ -149,6 +183,8 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
             timer = null;
             scanning = false;
         }
+        mc.stopBleScan();
+        bleScanning = false;
     }
 
     public void compute() {
@@ -156,8 +192,28 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         Log.d(TAG, "In compute");
 
         HashMap<String, List<String[]>> nodes = wifi2cotMapComponent.getNodes();
-
         List<AccessPointSummary> summaries = buildAccessPointSummaries(nodes);
+        dispatchSummaries(summaries, "a-f-G-I-E", "wifi2cot");
+    }
+
+    public boolean isScanning() {
+        return scanning;
+    }
+
+    public boolean isBleScanning() {
+        return bleScanning;
+    }
+
+    private void computeBle() {
+        Log.d(TAG, "In computeBle");
+
+        HashMap<String, List<String[]>> nodes = wifi2cotMapComponent.getBleNodes();
+        List<AccessPointSummary> summaries = buildAccessPointSummaries(nodes);
+        dispatchSummaries(summaries, "b-l-l", "MetaRadar");
+    }
+
+    private void dispatchSummaries(List<AccessPointSummary> summaries,
+            String cotType, String sourceLabel) {
         for (AccessPointSummary summary : summaries) {
             if (summary.sampleSize < MIN_SAMPLE_SIZE_FOR_DISPATCH) {
                 Log.d(TAG, String.format(Locale.US,
@@ -165,6 +221,9 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
                         summary.sampleSize));
                 continue;
             }
+
+            String displayName = (summary.ssid == null || summary.ssid.isEmpty())
+                    ? summary.bssid : summary.ssid;
 
             Log.d(TAG, String.format(Locale.US,
                     "Dispatching %s at %.14f, %.14f (avg strength %.2f)",
@@ -180,7 +239,7 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
 
             cotEvent.setUID(summary.bssid);
 
-            cotEvent.setType("a-f-G-I-E");
+            cotEvent.setType(cotType);
 
             cotEvent.setHow("m-g");
 
@@ -192,14 +251,14 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
             cotEvent.setDetail(cotDetail);
 
             CotDetail contactDetail = new CotDetail("contact");
-            contactDetail.setAttribute("callsign", summary.ssid);
+            contactDetail.setAttribute("callsign", displayName);
             contactDetail.setAttribute("endpoint", "0.0.0.0:4242:tcp");
 
             CotDetail cotRemark = new CotDetail("remarks");
-            cotRemark.setAttribute("source", "wifi2cot");
+            cotRemark.setAttribute("source", sourceLabel);
             cotRemark.setInnerText(String.format(Locale.US,
-                    "SSID: %s\nSample size: %d\nAverage signal quality: %.2f\nBest sample: %d\nWorst sample: %d",
-                    summary.ssid, summary.sampleSize, summary.averageSignal,
+                    "Label: %s\nSample size: %d\nAverage signal quality: %.2f\nBest sample: %d\nWorst sample: %d",
+                    displayName, summary.sampleSize, summary.averageSignal,
                     summary.strongestSample, summary.weakestSample));
 
             cotDetail.addChild(contactDetail);
@@ -210,10 +269,6 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
             else
                 Log.e(TAG, "cotEvent was not valid");
         }
-    }
-
-    public boolean isScanning() {
-        return scanning;
     }
 
     private List<AccessPointSummary> buildAccessPointSummaries(
