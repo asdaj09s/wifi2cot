@@ -53,6 +53,17 @@
             android:layout_marginTop="12dp"
             android:text="@string/available_signals" />
 
+        <TextView
+            android:id="@+id/scan_empty"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:gravity="center"
+            android:padding="12dp"
+            android:text="@string/no_signals_available"
+            android:textAppearance="?android:attr/textAppearanceSmall"
+            android:visibility="gone" />
+
         <ListView
             android:id="@+id/scan_list"
             android:layout_width="match_parent"

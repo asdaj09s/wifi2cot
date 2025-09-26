@@ -49,12 +49,14 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
     private final Button start, stop, guess;
     private final ListView scanList;
     private final TextView trackingStatus;
+    private final TextView scanEmptyView;
 
     private Timer scanTimer;
     private Timer uiUpdateTimer;
     private Timer trackTimer;
 
     private static final int MIN_SAMPLE_SIZE_FOR_DISPATCH = 3;
+    private static final int MAX_TRACKING_MISSES = 3;
 
     private boolean scanning = false;
     private final ArrayAdapter<String> scanListAdapter;
@@ -62,6 +64,7 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
     private String trackedId;
     private SignalSourceType trackedType;
     private String trackedDisplayName;
+    private int missingTrackedCycles;
 
     /**************************** CONSTRUCTOR *****************************/
 
@@ -82,11 +85,15 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         guess = templateView.findViewById(R.id.guess);
         scanList = templateView.findViewById(R.id.scan_list);
         trackingStatus = templateView.findViewById(R.id.tracking_status);
+        scanEmptyView = templateView.findViewById(R.id.scan_empty);
 
         scanListAdapter = new ArrayAdapter<>(context,
                 android.R.layout.simple_list_item_activated_1,
                 new ArrayList<>());
         scanList.setAdapter(scanListAdapter);
+        if (scanEmptyView != null) {
+            scanList.setEmptyView(scanEmptyView);
+        }
         scanList.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
         scanList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
@@ -139,6 +146,8 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
             Log.d(TAG, "showing plugin drop down");
             showDropDown(templateView, HALF_WIDTH, FULL_HEIGHT, FULL_WIDTH,
                     HALF_HEIGHT, false, this);
+
+            refreshScanSummaries();
 
             start.setOnClickListener(view -> {
                 Log.d(TAG, "Starting scan");
@@ -231,6 +240,7 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         trackedId = null;
         trackedType = null;
         trackedDisplayName = null;
+        missingTrackedCycles = 0;
         if (trackTimer != null) {
             trackTimer.cancel();
             trackTimer = null;
@@ -246,6 +256,7 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         trackedId = summary.id;
         trackedType = summary.type;
         trackedDisplayName = getDisplayName(summary);
+        missingTrackedCycles = 0;
         if (trackTimer != null) {
             trackTimer.cancel();
         }
@@ -320,6 +331,7 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
                 int index = findSummaryIndex(trackedId, trackedType);
                 if (index >= 0) {
                     scanList.setItemChecked(index, true);
+                    scanList.smoothScrollToPosition(index);
                 } else {
                     scanList.clearChoices();
                     updateTrackingStatus(null, true);
@@ -343,13 +355,30 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
         SignalSourceSummary summary = getSummaryForTrackedSource();
         if (summary == null) {
             if (trackedId != null && trackedType != null) {
-                updateTrackingStatus(null, true);
+                missingTrackedCycles++;
+                if (missingTrackedCycles >= MAX_TRACKING_MISSES) {
+                    final String lostName = trackedDisplayName != null
+                            && !trackedDisplayName.isEmpty() ? trackedDisplayName
+                                    : trackedId;
+                    final SignalSourceType lostType = trackedType;
+                    templateView.post(() -> Toast
+                            .makeText(MapView._mapView.getContext(),
+                                    pluginContext.getString(
+                                            R.string.tracking_lost,
+                                            getTypeLabel(lostType), lostName),
+                                    Toast.LENGTH_SHORT)
+                            .show());
+                    stopTracking();
+                } else {
+                    updateTrackingStatus(null, true);
+                }
             } else {
                 updateTrackingStatus(null, false);
             }
             return;
         }
 
+        missingTrackedCycles = 0;
         trackedDisplayName = getDisplayName(summary);
         if (summary.sampleSize < MIN_SAMPLE_SIZE_FOR_DISPATCH) {
             updateTrackingStatus(summary, true);
