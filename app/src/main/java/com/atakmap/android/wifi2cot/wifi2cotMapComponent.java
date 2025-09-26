@@ -123,39 +123,41 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
                     }
 
                     // data will be String["rssi", "self.lat", "self.lng", "bssid", "ssid"]
-                    if (!nodes.containsKey(s.BSSID)) {
-                        ArrayList<String[]> data = new ArrayList<>();
-                        String[] sample = new String[5];
-                        sample[0] = String.valueOf(100 - Math.abs(s.level));
-                        sample[1] = String.valueOf(lat);
-                        sample[2] = String.valueOf(lng);
-                        sample[3] = s.BSSID;
-                        sample[4] = s.SSID;
+                    synchronized (nodes) {
+                        if (!nodes.containsKey(s.BSSID)) {
+                            ArrayList<String[]> data = new ArrayList<>();
+                            String[] sample = new String[5];
+                            sample[0] = String.valueOf(100 - Math.abs(s.level));
+                            sample[1] = String.valueOf(lat);
+                            sample[2] = String.valueOf(lng);
+                            sample[3] = s.BSSID;
+                            sample[4] = s.SSID;
 
-                        if (sample[1].startsWith("0.0") && sample[2].startsWith("0.0")) {
-                            continue;
-                        }
+                            if (sample[1].startsWith("0.0") && sample[2].startsWith("0.0")) {
+                                continue;
+                            }
 
-                        data.add(sample);
-                        nodes.put(s.BSSID, data);
-                    } else {
-                        List<String[]> data = nodes.get(s.BSSID);
-                        String[] sample = new String[5];
-                        sample[0] = String.valueOf(100 - Math.abs(s.level));
-                        sample[1] = String.valueOf(lat);
-                        sample[2] = String.valueOf(lng);
-                        sample[3] = s.BSSID;
-                        sample[4] = s.SSID;
-
-                        if (sample[1].startsWith("0.0") && sample[2].startsWith("0.0")) {
-                            continue;
-                        }
-
-                        try {
                             data.add(sample);
                             nodes.put(s.BSSID, data);
-                        } catch (NullPointerException e) {
-                            e.printStackTrace();
+                        } else {
+                            List<String[]> data = nodes.get(s.BSSID);
+                            String[] sample = new String[5];
+                            sample[0] = String.valueOf(100 - Math.abs(s.level));
+                            sample[1] = String.valueOf(lat);
+                            sample[2] = String.valueOf(lng);
+                            sample[3] = s.BSSID;
+                            sample[4] = s.SSID;
+
+                            if (sample[1].startsWith("0.0") && sample[2].startsWith("0.0")) {
+                                continue;
+                            }
+
+                            try {
+                                data.add(sample);
+                                nodes.put(s.BSSID, data);
+                            } catch (NullPointerException e) {
+                                e.printStackTrace();
+                            }
                         }
                     }
                 }

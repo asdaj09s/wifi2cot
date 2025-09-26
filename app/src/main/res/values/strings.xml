@@ -5,7 +5,8 @@
     <!-- description -->
     <string name="app_desc">Grab RSSI values from local Access Points and try to guess where they are.</string>
 
-
-
-
+    <string name="tracking_none">Not tracking any access point.</string>
+    <string name="tracking_template">Tracking %1$s (%2$s).</string>
+    <string name="tracking_waiting">Tracking %1$s (%2$s) - awaiting more samples…</string>
+    <string name="available_access_points">Available Access Points</string>
 </resources>
