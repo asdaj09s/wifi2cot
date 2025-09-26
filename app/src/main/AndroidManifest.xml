@@ -3,18 +3,29 @@
     package="com.atakmap.android.wifi2cot.plugin"
     tools:ignore="GoogleAppIndexingWarning">
 
+    <!-- Wi-Fi / location (keep if you scan Wi-Fi or need location) -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.BLUETOOTH" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+
+    <!-- Legacy Bluetooth (pre-Android 12 / API 31). Limit to maxSdk 30 to avoid deprecation issues on S+. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+
+    <!-- Android 12+ (Nearby Devices) Bluetooth permissions -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation"
         tools:targetApi="s" />
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_CONNECT"
         tools:targetApi="s" />
+    <!-- If you advertise BLE beacons, also add:
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" tools:targetApi="s" />
+    -->
 
+    <!-- Declare BLE capability but don't require it so non-BLE devices aren’t filtered out -->
     <uses-feature
         android:name="android.hardware.bluetooth_le"
         android:required="false" />
@@ -25,21 +36,18 @@
         android:label="@string/app_name"
         android:description="@string/app_desc"
         android:extractNativeLibs="true"
-        android:theme="@style/AppTheme" >
-        <meta-data android:name="plugin-api" android:value="${atakApiVersion}"/>
-        <meta-data android:name="app_desc" android:value="@string/app_desc"/>
+        android:theme="@style/AppTheme">
+        <meta-data android:name="plugin-api" android:value="${atakApiVersion}" />
+        <meta-data android:name="app_desc" android:value="@string/app_desc" />
 
-
-       <!-- allow for plugin discovery -->
-       <activity android:name="com.atakmap.app.component"
-           tools:ignore="MissingClass"
-           android:exported="true">
-           <intent-filter android:label="@string/app_name">
-              <action android:name="com.atakmap.app.component" />
-           </intent-filter>
-       </activity>
-
-
+        <!-- allow for plugin discovery -->
+        <activity
+            android:name="com.atakmap.app.component"
+            tools:ignore="MissingClass"
+            android:exported="true">
+            <intent-filter android:label="@string/app_name">
+                <action android:name="com.atakmap.app.component" />
+            </intent-filter>
+        </activity>
     </application>
-
 </manifest>

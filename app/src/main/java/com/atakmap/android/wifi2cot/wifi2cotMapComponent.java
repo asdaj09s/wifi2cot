@@ -38,11 +38,11 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
     private ScanCallback bleScanCallback;
     private boolean bleScanActive = false;
 
+    // nodes will hold k,v for key (BSSID/MAC) -> [rssi, lat, lng, key, displayName]
     private static final HashMap<String, List<String[]>> wifiNodes = new HashMap<>();
     private static final HashMap<String, List<String[]>> bleNodes = new HashMap<>();
 
     public void onCreate(final Context context, Intent intent, final MapView view) {
-
         context.setTheme(R.style.ATAKPluginTheme);
         super.onCreate(context, intent, view);
         mapView = view;
@@ -56,24 +56,24 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
 
         wifiManager = (WifiManager) context.getSystemService(Context.WIFI_SERVICE);
 
+        // Bluetooth init
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
             BluetoothManager bluetoothManager =
                     (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
             if (bluetoothManager != null) {
                 bluetoothAdapter = bluetoothManager.getAdapter();
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP
-                        && bluetoothAdapter != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && bluetoothAdapter != null) {
                     bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
                     bleScanCallback = createBleScanCallback();
                 }
             }
         }
 
+        // Wi-Fi scan receiver
         wifiScanReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context c, Intent intent) {
-                boolean success = intent.getBooleanExtra(
-                        WifiManager.EXTRA_RESULTS_UPDATED, false);
+                boolean success = intent.getBooleanExtra(WifiManager.EXTRA_RESULTS_UPDATED, false);
                 Log.d(TAG, "wifiScanReceiver: " + success);
                 if (success) {
                     scanSuccess();
@@ -95,14 +95,11 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
 
     double getDistance(int rssi, int txPower, int freq) {
         int n = 2;
-        if (freq > 5000) {
-            n++;
-        }
+        if (freq > 5000) n++;
         return Math.pow(10d, ((double) txPower - rssi) / (10 * n));
     }
 
     private void scanSuccess() {
-
         Log.d(TAG, "Inside scanSuccess");
 
         if (ddr == null || !ddr.isScanning()) {
@@ -113,14 +110,10 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
         new Thread() {
             @Override
             public void run() {
-
-                if (wifiManager == null) {
-                    return;
-                }
+                if (wifiManager == null) return;
 
                 List<android.net.wifi.ScanResult> results = wifiManager.getScanResults();
                 for (android.net.wifi.ScanResult s : results) {
-
                     Log.d(TAG, "Scan result: BSSID: " + s.BSSID + " SSID: " + s.SSID
                             + " RSSI: " + s.level + " Freq: " + s.frequency);
 
@@ -146,9 +139,9 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
     }
 
     private void scanFailure() {
-        if (wifiManager == null) {
-            return;
-        }
+        if (wifiManager == null) return;
+
+        // handle failure: consider using old scan results (these are OLD results)
         List<android.net.wifi.ScanResult> results = wifiManager.getScanResults();
         Log.d(TAG, "Scan failed");
         for (android.net.wifi.ScanResult s : results) {
@@ -160,7 +153,6 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
             return null;
         }
-
         return new ScanCallback() {
             @Override
             public void onScanResult(int callbackType, ScanResult result) {
@@ -169,9 +161,7 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
 
             @Override
             public void onBatchScanResults(List<ScanResult> results) {
-                if (results == null) {
-                    return;
-                }
+                if (results == null) return;
                 for (ScanResult result : results) {
                     handleBleScanResult(result);
                 }
@@ -185,9 +175,7 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
     }
 
     private void handleBleScanResult(ScanResult result) {
-        if (result == null || ddr == null || !ddr.isBleScanning()) {
-            return;
-        }
+        if (result == null || ddr == null || !ddr.isBleScanning()) return;
 
         if (mapView == null || mapView.getSelfMarker() == null
                 || mapView.getSelfMarker().getPoint() == null) {
@@ -206,6 +194,7 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
         String latString = String.valueOf(lat);
         String lngString = String.valueOf(lng);
 
+        // guard against bogus 0.0... strings
         if (latString.startsWith("0.0") && lngString.startsWith("0.0")) {
             return;
         }
@@ -217,14 +206,10 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
 
         String address = result.getDevice().getAddress();
         String name = result.getDevice().getName();
-        if (name == null) {
-            name = "";
-        }
+        if (name == null) name = "";
 
         int quality = 100 - Math.abs(result.getRssi());
-        if (quality < 0) {
-            quality = 0;
-        }
+        if (quality < 0) quality = 0;
 
         recordSignalSample(bleNodes, address, name, quality, lat, lng);
     }
@@ -235,37 +220,30 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
             Log.w(TAG, "BLE scanning not supported on this device");
             return false;
         }
-
         if (bluetoothAdapter == null) {
             Log.w(TAG, "Bluetooth adapter not available");
             return false;
         }
-
         if (!bluetoothAdapter.isEnabled()) {
             Log.w(TAG, "Bluetooth adapter is disabled");
             return false;
         }
-
         if (bluetoothLeScanner == null) {
             bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
         }
-
         if (bluetoothLeScanner == null) {
             Log.w(TAG, "Bluetooth LE scanner not available");
             return false;
         }
-
         if (bleScanCallback == null) {
             bleScanCallback = createBleScanCallback();
         }
-
         if (bleScanCallback == null) {
             Log.w(TAG, "BLE scan callback not initialized");
             return false;
         }
-
         if (bleScanActive) {
-            return true;
+            return true; // already scanning
         }
 
         try {
@@ -280,9 +258,7 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
 
     @SuppressLint("MissingPermission")
     public void stopBleScan() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-            return;
-        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return;
 
         if (bluetoothLeScanner == null || bleScanCallback == null || !bleScanActive) {
             return;
@@ -319,13 +295,9 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
     }
 
     private void recordSignalSample(HashMap<String, List<String[]>> target,
-            String key, String name, int strength, double lat, double lng) {
-        if (key == null || key.isEmpty()) {
-            return;
-        }
-        if ((lat == 0 && lng == 0) || Double.isNaN(lat) || Double.isNaN(lng)) {
-            return;
-        }
+                                    String key, String name, int strength, double lat, double lng) {
+        if (key == null || key.isEmpty()) return;
+        if ((lat == 0 && lng == 0) || Double.isNaN(lat) || Double.isNaN(lng)) return;
 
         String[] sample = new String[5];
         sample[0] = String.valueOf(strength);
@@ -344,4 +316,3 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
         }
     }
 }
-
