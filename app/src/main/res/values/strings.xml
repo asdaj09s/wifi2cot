@@ -13,4 +13,12 @@
     <string name="type_ble">BLE</string>
     <string name="available_signals">Available Signals</string>
     <string name="no_signals_available">No signal sources discovered yet.</string>
+    <string name="wifi_scanning_title">Wi-Fi Scanning</string>
+    <string name="start_scan">Start Scan</string>
+    <string name="stop_scan">Stop Scan</string>
+    <string name="take_guess">Take a Guess</string>
+    <string name="ble_scanning_title">MetaRadar BLE Scanning</string>
+    <string name="start_ble_scan">Start BLE Scan</string>
+    <string name="stop_ble_scan">Stop BLE Scan</string>
+    <string name="dispatch_ble_results">Dispatch BLE Results</string>
 </resources>

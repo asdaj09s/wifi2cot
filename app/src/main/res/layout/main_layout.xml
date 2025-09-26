@@ -20,25 +20,25 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Wi-Fi Scanning" />
+            android:text="@string/wifi_scanning_title" />
 
         <Button
             android:id="@+id/start"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Start Scan" />
+            android:text="@string/start_scan" />
 
         <Button
             android:id="@+id/stop"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Stop Scan" />
+            android:text="@string/stop_scan" />
 
         <Button
             android:id="@+id/guess"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Take a Guess" />
+            android:text="@string/take_guess" />
 
         <TextView
             android:id="@+id/tracking_status"
@@ -78,24 +78,24 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="MetaRadar BLE Scanning" />
+            android:text="@string/ble_scanning_title" />
 
         <Button
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Start BLE Scan"
+            android:text="@string/start_ble_scan"
             android:id="@+id/start_ble"/>
 
         <Button
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Stop BLE Scan"
+            android:text="@string/stop_ble_scan"
             android:id="@+id/stop_ble"/>
 
         <Button
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Dispatch BLE Results"
+            android:text="@string/dispatch_ble_results"
             android:id="@+id/guess_ble"/>
 
         <View
@@ -105,24 +105,24 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="MetaRadar BLE Scanning" />
+            android:text="@string/ble_scanning_title" />
 
         <Button
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Start BLE Scan"
+            android:text="@string/start_ble_scan"
             android:id="@+id/start_ble"/>
 
         <Button
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Stop BLE Scan"
+            android:text="@string/stop_ble_scan"
             android:id="@+id/stop_ble"/>
 
         <Button
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Dispatch BLE Results"
+            android:text="@string/dispatch_ble_results"
             android:id="@+id/guess_ble"/>
 
     </LinearLayout>
