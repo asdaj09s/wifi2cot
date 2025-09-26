@@ -22,6 +22,7 @@ import com.atakmap.android.dropdown.DropDownReceiver;
 import com.atakmap.coremap.log.Log;
 import com.atakmap.coremap.maps.time.CoordinatedTime;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -44,6 +45,8 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
     private final Button start, stop, guess;
 
     private Timer timer;
+
+    private static final int MIN_SAMPLE_SIZE_FOR_DISPATCH = 3;
 
     private boolean scanning = false;
 
@@ -110,7 +113,10 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
 
             stop.setOnClickListener(view -> {
                 scanning = false;
-                timer.cancel();
+                if (timer != null) {
+                    timer.cancel();
+                    timer = null;
+                }
                 Log.d(TAG, "Stopping scan");
                 Toast.makeText(MapView._mapView.getContext(), "Stopping scan",
                         Toast.LENGTH_LONG).show();
@@ -151,41 +157,19 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
 
         HashMap<String, List<String[]>> nodes = wifi2cotMapComponent.getNodes();
 
-        double[] rssi_sum = new double[nodes.size()];
-
-        // build rssi_sum
-        // for every BSSID, sum up all the rssi values rssi value = 100 - abs(rssi)
-        int i = 0;
-        for (Map.Entry<String, List<String[]>> s: nodes.entrySet()) {
-            Log.d(TAG, s.getKey());
-            for (String[] l: s.getValue()) {
-                rssi_sum[i] += Integer.parseInt(l[0]);
-                Log.d(TAG, String.format(Locale.US, "RECORD: %s %s %s", l[0],l[1],l[2]));
+        List<AccessPointSummary> summaries = buildAccessPointSummaries(nodes);
+        for (AccessPointSummary summary : summaries) {
+            if (summary.sampleSize < MIN_SAMPLE_SIZE_FOR_DISPATCH) {
+                Log.d(TAG, String.format(Locale.US,
+                        "Skipping %s because it only has %d samples", summary.bssid,
+                        summary.sampleSize));
+                continue;
             }
-            Log.d(TAG, String.format(Locale.US, "RSSI_SUM %f", rssi_sum[i]));
-            i++;
-        }
 
-        // approx triangulation
-        // sum up all the lat/lng * weighted ratio for that point
-        i = 0;
-        for (Map.Entry<String, List<String[]>> s: nodes.entrySet()) {
-            double lat = 0.0;
-            double lng = 0.0;
-            String bssid = "";
-            String ssid = "";
-            int sampleSize = 0;
-
-            for (String[] l: s.getValue()) {
-                double ratio = Integer.parseInt(l[0]) / rssi_sum[i];
-                lat += Double.parseDouble(l[1]) * ratio;
-                lng += Double.parseDouble(l[2]) * ratio;
-                bssid = l[3];
-                ssid = l[4];
-                sampleSize++;
-            }
-            Log.d(TAG, String.format(Locale.US, "LAT: %.14f LNG: %.14f", lat, lng));
-            i++;
+            Log.d(TAG, String.format(Locale.US,
+                    "Dispatching %s at %.14f, %.14f (avg strength %.2f)",
+                    summary.bssid, summary.latitude, summary.longitude,
+                    summary.averageSignal));
 
             CotEvent cotEvent = new CotEvent();
 
@@ -194,26 +178,29 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
             cotEvent.setStart(time);
             cotEvent.setStale(time.addMinutes(90));
 
-            cotEvent.setUID(bssid);
+            cotEvent.setUID(summary.bssid);
 
             cotEvent.setType("a-f-G-I-E");
 
             cotEvent.setHow("m-g");
 
-            CotPoint cotPoint = new CotPoint(lat, lng, CotPoint.UNKNOWN,
-                    CotPoint.UNKNOWN, CotPoint.UNKNOWN);
+            CotPoint cotPoint = new CotPoint(summary.latitude, summary.longitude,
+                    CotPoint.UNKNOWN, CotPoint.UNKNOWN, CotPoint.UNKNOWN);
             cotEvent.setPoint(cotPoint);
 
             CotDetail cotDetail = new CotDetail("detail");
             cotEvent.setDetail(cotDetail);
 
             CotDetail contactDetail = new CotDetail("contact");
-            contactDetail.setAttribute("callsign", ssid);
+            contactDetail.setAttribute("callsign", summary.ssid);
             contactDetail.setAttribute("endpoint", "0.0.0.0:4242:tcp");
 
             CotDetail cotRemark = new CotDetail("remarks");
             cotRemark.setAttribute("source", "wifi2cot");
-            cotRemark.setInnerText(String.format(Locale.US, "SSID: %s\nSample size: %d", ssid, sampleSize));
+            cotRemark.setInnerText(String.format(Locale.US,
+                    "SSID: %s\nSample size: %d\nAverage signal quality: %.2f\nBest sample: %d\nWorst sample: %d",
+                    summary.ssid, summary.sampleSize, summary.averageSignal,
+                    summary.strongestSample, summary.weakestSample));
 
             cotDetail.addChild(contactDetail);
             cotDetail.addChild(cotRemark);
@@ -227,5 +214,80 @@ public class wifi2cotDropDownReceiver extends DropDownReceiver implements
 
     public boolean isScanning() {
         return scanning;
+    }
+
+    private List<AccessPointSummary> buildAccessPointSummaries(
+            Map<String, List<String[]>> nodes) {
+        List<AccessPointSummary> summaries = new ArrayList<>();
+        for (Map.Entry<String, List<String[]>> entry : nodes.entrySet()) {
+            List<String[]> samples = entry.getValue();
+            if (samples == null || samples.isEmpty()) {
+                continue;
+            }
+
+            double weightedLatSum = 0.0;
+            double weightedLngSum = 0.0;
+            double weightTotal = 0.0;
+            int strongestSample = Integer.MIN_VALUE;
+            int weakestSample = Integer.MAX_VALUE;
+            String ssid = "";
+
+            for (String[] sample : samples) {
+                int weight = Integer.parseInt(sample[0]);
+                double lat = Double.parseDouble(sample[1]);
+                double lng = Double.parseDouble(sample[2]);
+                ssid = sample[4];
+
+                weightTotal += weight;
+                weightedLatSum += lat * weight;
+                weightedLngSum += lng * weight;
+
+                if (weight > strongestSample) {
+                    strongestSample = weight;
+                }
+                if (weight < weakestSample) {
+                    weakestSample = weight;
+                }
+            }
+
+            if (weightTotal == 0.0) {
+                Log.d(TAG, String.format(Locale.US,
+                        "Skipping %s due to zero weight total", entry.getKey()));
+                continue;
+            }
+
+            double avgSignal = weightTotal / samples.size();
+            double lat = weightedLatSum / weightTotal;
+            double lng = weightedLngSum / weightTotal;
+
+            summaries.add(new AccessPointSummary(entry.getKey(), ssid, lat, lng,
+                    samples.size(), avgSignal, strongestSample, weakestSample));
+        }
+
+        return summaries;
+    }
+
+    private static class AccessPointSummary {
+        final String bssid;
+        final String ssid;
+        final double latitude;
+        final double longitude;
+        final int sampleSize;
+        final double averageSignal;
+        final int strongestSample;
+        final int weakestSample;
+
+        AccessPointSummary(String bssid, String ssid, double latitude,
+                double longitude, int sampleSize, double averageSignal,
+                int strongestSample, int weakestSample) {
+            this.bssid = bssid;
+            this.ssid = ssid;
+            this.latitude = latitude;
+            this.longitude = longitude;
+            this.sampleSize = sampleSize;
+            this.averageSignal = averageSignal;
+            this.strongestSample = strongestSample;
+            this.weakestSample = weakestSample;
+        }
     }
 }
