@@ -41,5 +41,32 @@
             android:text="Take a Guess"
             android:id="@+id/guess"/>
 
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="16dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="MetaRadar BLE Scanning" />
+
+        <Button
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Start BLE Scan"
+            android:id="@+id/start_ble"/>
+
+        <Button
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Stop BLE Scan"
+            android:id="@+id/stop_ble"/>
+
+        <Button
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Dispatch BLE Results"
+            android:id="@+id/guess_ble"/>
+
     </LinearLayout>
 </ScrollView>

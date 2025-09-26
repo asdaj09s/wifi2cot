@@ -1,12 +1,18 @@
 
 package com.atakmap.android.wifi2cot;
 
+import android.annotation.SuppressLint;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothManager;
+import android.bluetooth.le.BluetoothLeScanner;
+import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanResult;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.net.wifi.ScanResult;
 import android.net.wifi.WifiManager;
+import android.os.Build;
 
 import com.atakmap.android.ipc.AtakBroadcast.DocumentedIntentFilter;
 
@@ -35,8 +41,16 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
 
     private BroadcastReceiver wifiScanReceiver;
 
+    private BluetoothAdapter bluetoothAdapter;
+
+    private BluetoothLeScanner bluetoothLeScanner;
+
+    private ScanCallback bleScanCallback;
+
     // nodes will hold k,v for the BSSID and the rssi,lat,lng,bssid,ssid values
     private final static HashMap<String, List<String[]>> nodes = new HashMap<>();
+
+    private final static HashMap<String, List<String[]>> bleNodes = new HashMap<>();
 
     public void onCreate(final Context context, Intent intent,
             final MapView view) {
@@ -55,6 +69,19 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
         registerDropDownReceiver(ddr, ddFilter);
 
         wifiManager = (WifiManager) context.getSystemService(Context.WIFI_SERVICE);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
+            BluetoothManager bluetoothManager =
+                    (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
+            if (bluetoothManager != null) {
+                bluetoothAdapter = bluetoothManager.getAdapter();
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP
+                        && bluetoothAdapter != null) {
+                    bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
+                    bleScanCallback = createBleScanCallback();
+                }
+            }
+        }
 
         wifiScanReceiver = new BroadcastReceiver() {
             @Override
@@ -109,8 +136,8 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
             @Override
             public void run() {
 
-                List<ScanResult> results = wifiManager.getScanResults();
-                for (ScanResult s: results) {
+                List<android.net.wifi.ScanResult> results = wifiManager.getScanResults();
+                for (android.net.wifi.ScanResult s : results) {
 
                     Log.d(TAG, "Scan result: BSSID: " + s.BSSID + " SSID: " + s.SSID + " RSSI: " + s.level + " Freq: " + s.frequency);
 
@@ -166,9 +193,157 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
     private void scanFailure() {
         // handle failure: new scan did NOT succeed
         // consider using old scan results: these are the OLD results!
-        List<ScanResult> results = wifiManager.getScanResults();
+        List<android.net.wifi.ScanResult> results = wifiManager.getScanResults();
         Log.d(TAG, "Scan failed");
 //  ... potentially use older scan results ...
+    }
+
+    private ScanCallback createBleScanCallback() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            return null;
+        }
+
+        return new ScanCallback() {
+            @Override
+            public void onScanResult(int callbackType, ScanResult result) {
+                handleBleScanResult(result);
+            }
+
+            @Override
+            public void onBatchScanResults(List<ScanResult> results) {
+                if (results == null) {
+                    return;
+                }
+                for (ScanResult result : results) {
+                    handleBleScanResult(result);
+                }
+            }
+
+            @Override
+            public void onScanFailed(int errorCode) {
+                Log.e(TAG, "BLE scan failed: " + errorCode);
+            }
+        };
+    }
+
+    private void handleBleScanResult(ScanResult result) {
+        if (result == null || ddr == null || !ddr.isBleScanning()) {
+            return;
+        }
+
+        if (mapView == null || mapView.getSelfMarker() == null
+                || mapView.getSelfMarker().getPoint() == null) {
+            Log.d(TAG, "MapView not ready for BLE sample");
+            return;
+        }
+
+        double lat = mapView.getSelfMarker().getPoint().getLatitude();
+        double lng = mapView.getSelfMarker().getPoint().getLongitude();
+
+        if (lat == 0.0 && lng == 0.0) {
+            Log.d(TAG, "No GPS fix for BLE sample");
+            return;
+        }
+
+        String latString = String.valueOf(lat);
+        String lngString = String.valueOf(lng);
+
+        if (latString.startsWith("0.0") && lngString.startsWith("0.0")) {
+            return;
+        }
+
+        if (result.getDevice() == null || result.getDevice().getAddress() == null
+                || result.getDevice().getAddress().isEmpty()) {
+            return;
+        }
+
+        String address = result.getDevice().getAddress();
+        String name = result.getDevice().getName();
+        if (name == null) {
+            name = "";
+        }
+
+        int quality = 100 - Math.abs(result.getRssi());
+        if (quality < 0) {
+            quality = 0;
+        }
+
+        String[] sample = new String[5];
+        sample[0] = String.valueOf(quality);
+        sample[1] = latString;
+        sample[2] = lngString;
+        sample[3] = address;
+        sample[4] = name;
+
+        synchronized (bleNodes) {
+            List<String[]> data = bleNodes.get(address);
+            if (data == null) {
+                data = new ArrayList<>();
+                bleNodes.put(address, data);
+            }
+            data.add(sample);
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    public boolean startBleScan() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            Log.w(TAG, "BLE scanning not supported on this device");
+            return false;
+        }
+
+        if (bluetoothAdapter == null) {
+            Log.w(TAG, "Bluetooth adapter not available");
+            return false;
+        }
+
+        if (!bluetoothAdapter.isEnabled()) {
+            Log.w(TAG, "Bluetooth adapter is disabled");
+            return false;
+        }
+
+        if (bluetoothLeScanner == null) {
+            bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
+        }
+
+        if (bluetoothLeScanner == null) {
+            Log.w(TAG, "Bluetooth LE scanner not available");
+            return false;
+        }
+
+        if (bleScanCallback == null) {
+            bleScanCallback = createBleScanCallback();
+        }
+
+        if (bleScanCallback == null) {
+            Log.w(TAG, "BLE scan callback not initialized");
+            return false;
+        }
+
+        try {
+            bluetoothLeScanner.startScan(bleScanCallback);
+            return true;
+        } catch (SecurityException e) {
+            Log.e(TAG, "Missing permission to start BLE scan", e);
+            return false;
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    public void stopBleScan() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            return;
+        }
+
+        if (bluetoothLeScanner == null || bleScanCallback == null) {
+            return;
+        }
+
+        try {
+            bluetoothLeScanner.stopScan(bleScanCallback);
+        } catch (SecurityException e) {
+            Log.e(TAG, "Missing permission to stop BLE scan", e);
+        }
     }
 
     @Override
@@ -176,6 +351,7 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
         if (wifiScanReceiver != null) {
             context.unregisterReceiver(wifiScanReceiver);
         }
+        stopBleScan();
         super.onDestroyImpl(context, view);
     }
 
@@ -185,6 +361,10 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
 
     public static HashMap<String, List<String[]>> getNodes() {
         return nodes;
+    }
+
+    public static HashMap<String, List<String[]>> getBleNodes() {
+        return bleNodes;
     }
 
 }
