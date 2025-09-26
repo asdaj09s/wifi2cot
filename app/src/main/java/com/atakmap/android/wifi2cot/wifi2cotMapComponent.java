@@ -133,7 +133,7 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
                         sample[4] = s.SSID;
 
                         if (sample[1].startsWith("0.0") && sample[2].startsWith("0.0")) {
-                            return;
+                            continue;
                         }
 
                         data.add(sample);
@@ -148,7 +148,7 @@ public class wifi2cotMapComponent extends DropDownMapComponent {
                         sample[4] = s.SSID;
 
                         if (sample[1].startsWith("0.0") && sample[2].startsWith("0.0")) {
-                            return;
+                            continue;
                         }
 
                         try {
